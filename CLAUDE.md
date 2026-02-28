@@ -11,7 +11,7 @@ A collection of retro-style browser games. Each game is a **single self-containe
 - **One file per game** — HTML, CSS, and JS all live in one `.html` file.
 - **No external dependencies** — everything is vanilla JS and HTML5 Canvas (or DOM for simpler games).
 - **Retro dark aesthetic** — dark backgrounds, limited color palette, monospace fonts, pixel-art style via canvas primitives (no image assets).
-- **Git workflow** — commit each meaningful change with a Conventional Commits message (`feat:`, `fix:`, `chore:`) and push to `origin/master` via SSH.
+- **Git workflow** — commit and push to `origin/master` (via SSH) frequently throughout all work sessions. Never leave a working state uncommitted. Use Conventional Commits: `feat:`, `fix:`, `chore:`. Push after every commit so work is never lost and any state can be reverted via GitHub.
 
 ## Games
 
