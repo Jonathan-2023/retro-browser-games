@@ -24,6 +24,31 @@
       letter-spacing: 2px;
     }
 
+    #mode-select {
+      display: flex;
+      gap: 0.75rem;
+      margin-bottom: 1.2rem;
+    }
+
+    .mode-btn {
+      padding: 0.4rem 1.2rem;
+      font-size: 0.95rem;
+      background: #16213e;
+      color: #aaa;
+      border: 2px solid #333;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: background 0.15s, border-color 0.15s, color 0.15s;
+    }
+
+    .mode-btn.active {
+      background: #0f3460;
+      color: #eee;
+      border-color: #a0c4ff;
+    }
+
+    .mode-btn:hover:not(.active) { background: #1e2a50; border-color: #555; color: #eee; }
+
     #status {
       font-size: 1.2rem;
       margin-bottom: 1.5rem;
@@ -50,10 +75,11 @@
       user-select: none;
     }
 
-    .cell:hover:not(.taken) {
+    .cell:hover:not(.taken):not(.blocked) {
       background: #0f3460;
     }
 
+    .cell.blocked { cursor: default; }
     .cell.x { color: #ff6b6b; }
     .cell.o { color: #4ecdc4; }
     .cell.win { background: #0f3460; box-shadow: 0 0 15px rgba(160, 196, 255, 0.4); }
@@ -85,74 +111,182 @@
 </head>
 <body>
   <h1>Tic Tac Toe</h1>
-  <div id="status">X's turn</div>
+
+  <div id="mode-select">
+    <button class="mode-btn active" id="btn1p">1 Player</button>
+    <button class="mode-btn" id="btn2p">2 Players</button>
+  </div>
+
+  <div id="status"></div>
   <div id="board"></div>
   <button id="reset">New Game</button>
   <div id="score">
-    X wins: <span id="scoreX">0</span>
+    <div id="label-x">X wins: <span id="scoreX">0</span></div>
     Draws: <span id="scoreDraw">0</span>
-    O wins: <span id="scoreO">0</span>
+    <div id="label-o">O wins: <span id="scoreO">0</span></div>
   </div>
 
   <script>
-    const board = document.getElementById('board');
-    const status = document.getElementById('status');
+    const boardEl = document.getElementById('board');
+    const statusEl = document.getElementById('status');
     const scoreX = document.getElementById('scoreX');
     const scoreO = document.getElementById('scoreO');
     const scoreDraw = document.getElementById('scoreDraw');
+    const labelX = document.getElementById('label-x');
+    const labelO = document.getElementById('label-o');
 
     const WINS = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
 
-    let cells, current, over, scores = { X: 0, O: 0, D: 0 };
+    let cells, current, over, aiThinking;
+    let mode = '1p'; // '1p' or '2p'
+    let scores = { X: 0, O: 0, D: 0 };
+
+    // --- Mode buttons ---
+    document.getElementById('btn1p').addEventListener('click', () => setMode('1p'));
+    document.getElementById('btn2p').addEventListener('click', () => setMode('2p'));
+
+    function setMode(m) {
+      mode = m;
+      scores = { X: 0, O: 0, D: 0 };
+      scoreX.textContent = 0; scoreO.textContent = 0; scoreDraw.textContent = 0;
+      document.getElementById('btn1p').classList.toggle('active', m === '1p');
+      document.getElementById('btn2p').classList.toggle('active', m === '2p');
+      labelX.innerHTML = (m === '1p' ? 'You: ' : 'X wins: ') + '<span id="scoreX">0</span>';
+      labelO.innerHTML = (m === '1p' ? 'Computer: ' : 'O wins: ') + '<span id="scoreO">0</span>';
+      init();
+    }
 
     function init() {
       cells = Array(9).fill('');
       current = 'X';
       over = false;
-      status.textContent = "X's turn";
-      board.innerHTML = '';
+      aiThinking = false;
+      boardEl.innerHTML = '';
       for (let i = 0; i < 9; i++) {
         const cell = document.createElement('div');
         cell.className = 'cell';
         cell.dataset.i = i;
         cell.addEventListener('click', handleClick);
-        board.appendChild(cell);
+        boardEl.appendChild(cell);
+      }
+      updateStatus();
+    }
+
+    function updateStatus() {
+      if (mode === '1p') {
+        if (over) return;
+        statusEl.textContent = current === 'X' ? 'Your turn' : 'Computer thinking…';
+      } else {
+        if (over) return;
+        statusEl.textContent = `${current}'s turn`;
       }
     }
 
     function handleClick(e) {
       const i = +e.target.dataset.i;
-      if (over || cells[i]) return;
-      cells[i] = current;
-      e.target.textContent = current;
-      e.target.classList.add('taken', current.toLowerCase());
+      if (over || cells[i] || aiThinking) return;
+      if (mode === '1p' && current !== 'X') return; // block clicks during AI turn
 
-      const win = checkWin();
-      if (win) {
-        win.forEach(idx => board.children[idx].classList.add('win'));
-        status.textContent = `${current} wins!`;
-        scores[current]++;
-        over = true;
-      } else if (cells.every(Boolean)) {
-        status.textContent = "It's a draw!";
-        scores.D++;
-        over = true;
-      } else {
-        current = current === 'X' ? 'O' : 'X';
-        status.textContent = `${current}'s turn`;
+      playMove(i);
+
+      if (!over && mode === '1p' && current === 'O') {
+        aiThinking = true;
+        updateStatus();
+        setTimeout(doAiMove, 350);
       }
-
-      scoreX.textContent = scores.X;
-      scoreO.textContent = scores.O;
-      scoreDraw.textContent = scores.D;
     }
 
-    function checkWin() {
-      return WINS.find(([a, b, c]) => cells[a] && cells[a] === cells[b] && cells[b] === cells[c]) || null;
+    function doAiMove() {
+      const move = bestMove();
+      if (move !== -1) playMove(move);
+      aiThinking = false;
+    }
+
+    function playMove(i) {
+      cells[i] = current;
+      const cell = boardEl.children[i];
+      cell.textContent = current;
+      cell.classList.add('taken', current.toLowerCase());
+
+      const win = checkWin(cells);
+      if (win) {
+        win.forEach(idx => boardEl.children[idx].classList.add('win'));
+        if (mode === '1p') {
+          statusEl.textContent = current === 'X' ? 'You win!' : 'Computer wins!';
+        } else {
+          statusEl.textContent = `${current} wins!`;
+        }
+        scores[current]++;
+        over = true;
+        refreshScores();
+      } else if (cells.every(Boolean)) {
+        statusEl.textContent = "It's a draw!";
+        scores.D++;
+        over = true;
+        refreshScores();
+      } else {
+        current = current === 'X' ? 'O' : 'X';
+        updateStatus();
+      }
+    }
+
+    function refreshScores() {
+      document.getElementById('scoreX').textContent = scores.X;
+      document.getElementById('scoreO').textContent = scores.O;
+      document.getElementById('scoreDraw').textContent = scores.D;
+    }
+
+    function checkWin(b) {
+      return WINS.find(([a, c, d]) => b[a] && b[a] === b[c] && b[c] === b[d]) || null;
+    }
+
+    // --- Minimax AI ---
+    function minimax(b, isMaximizing) {
+      const win = checkWin(b);
+      if (win) {
+        const winner = b[win[0]];
+        return winner === 'O' ? 10 : -10;
+      }
+      if (b.every(Boolean)) return 0;
+
+      if (isMaximizing) {
+        let best = -Infinity;
+        for (let i = 0; i < 9; i++) {
+          if (!b[i]) {
+            b[i] = 'O';
+            best = Math.max(best, minimax(b, false));
+            b[i] = '';
+          }
+        }
+        return best;
+      } else {
+        let best = Infinity;
+        for (let i = 0; i < 9; i++) {
+          if (!b[i]) {
+            b[i] = 'X';
+            best = Math.min(best, minimax(b, true));
+            b[i] = '';
+          }
+        }
+        return best;
+      }
+    }
+
+    function bestMove() {
+      let best = -Infinity, move = -1;
+      for (let i = 0; i < 9; i++) {
+        if (!cells[i]) {
+          cells[i] = 'O';
+          const score = minimax(cells, false);
+          cells[i] = '';
+          if (score > best) { best = score; move = i; }
+        }
+      }
+      return move;
     }
 
     document.getElementById('reset').addEventListener('click', init);
-    init();
+    setMode('1p');
   </script>
 </body>
 </html>
