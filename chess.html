@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Chess</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #1a1a2e;
+    color: #e0e0e0;
+    font-family: monospace;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-height: 100vh;
+    padding: 20px;
+  }
+  h1 { font-size: 2rem; letter-spacing: 4px; margin-bottom: 12px; color: #c8a97e; }
+  #mode-btns { display: flex; gap: 10px; margin-bottom: 12px; }
+  button {
+    background: #2a2a4e;
+    color: #c8a97e;
+    border: 1px solid #c8a97e;
+    padding: 6px 18px;
+    font-family: monospace;
+    font-size: 0.9rem;
+    cursor: pointer;
+    letter-spacing: 1px;
+  }
+  button:hover { background: #3a3a6e; }
+  button.active { background: #c8a97e; color: #1a1a2e; }
+  #status {
+    font-size: 1rem;
+    margin-bottom: 10px;
+    height: 22px;
+    color: #e0e0e0;
+    letter-spacing: 1px;
+  }
+  canvas { display: block; cursor: pointer; }
+  #new-game { margin-top: 12px; }
+</style>
+</head>
+<body>
+<h1>CHESS</h1>
+<div id="mode-btns">
+  <button id="btn-1p" class="active" onclick="setMode('1p')">1 Player</button>
+  <button id="btn-2p" onclick="setMode('2p')">2 Players</button>
+</div>
+<div id="status">Your turn (White)</div>
+<canvas id="c" width="560" height="560"></canvas>
+<button id="new-game" onclick="newGame()">New Game</button>
+
+<script>
+const SQ = 70;
+const LIGHT = '#c8a97e';
+const DARK  = '#8b6343';
+const GLYPHS = {
+  white: { king:'♔', queen:'♕', rook:'♖', bishop:'♗', knight:'♘', pawn:'♙' },
+  black: { king:'♚', queen:'♛', rook:'♜', bishop:'♝', knight:'♞', pawn:'♟' }
+};
+
+// Piece values for AI
+const VAL = { pawn:100, knight:320, bishop:330, rook:500, queen:900, king:20000 };
+
+// Piece-square tables (from white's perspective, rank 0 = white back rank)
+const PST = {
+  pawn: [
+    [0,0,0,0,0,0,0,0],
+    [50,50,50,50,50,50,50,50],
+    [10,10,20,30,30,20,10,10],
+    [5,5,10,25,25,10,5,5],
+    [0,0,0,20,20,0,0,0],
+    [5,-5,-10,0,0,-10,-5,5],
+    [5,10,10,-20,-20,10,10,5],
+    [0,0,0,0,0,0,0,0]
+  ],
+  knight: [
+    [-50,-40,-30,-30,-30,-30,-40,-50],
+    [-40,-20,0,0,0,0,-20,-40],
+    [-30,0,10,15,15,10,0,-30],
+    [-30,5,15,20,20,15,5,-30],
+    [-30,0,15,20,20,15,0,-30],
+    [-30,5,10,15,15,10,5,-30],
+    [-40,-20,0,5,5,0,-20,-40],
+    [-50,-40,-30,-30,-30,-30,-40,-50]
+  ],
+  bishop: [
+    [-20,-10,-10,-10,-10,-10,-10,-20],
+    [-10,0,0,0,0,0,0,-10],
+    [-10,0,5,10,10,5,0,-10],
+    [-10,5,5,10,10,5,5,-10],
+    [-10,0,10,10,10,10,0,-10],
+    [-10,10,10,10,10,10,10,-10],
+    [-10,5,0,0,0,0,5,-10],
+    [-20,-10,-10,-10,-10,-10,-10,-20]
+  ],
+  rook: [
+    [0,0,0,0,0,0,0,0],
+    [5,10,10,10,10,10,10,5],
+    [-5,0,0,0,0,0,0,-5],
+    [-5,0,0,0,0,0,0,-5],
+    [-5,0,0,0,0,0,0,-5],
+    [-5,0,0,0,0,0,0,-5],
+    [-5,0,0,0,0,0,0,-5],
+    [0,0,0,5,5,0,0,0]
+  ],
+  queen: [
+    [-20,-10,-10,-5,-5,-10,-10,-20],
+    [-10,0,0,0,0,0,0,-10],
+    [-10,0,5,5,5,5,0,-10],
+    [-5,0,5,5,5,5,0,-5],
+    [0,0,5,5,5,5,0,-5],
+    [-10,5,5,5,5,5,0,-10],
+    [-10,0,5,0,0,0,0,-10],
+    [-20,-10,-10,-5,-5,-10,-10,-20]
+  ],
+  king: [
+    [-30,-40,-40,-50,-50,-40,-40,-30],
+    [-30,-40,-40,-50,-50,-40,-40,-30],
+    [-30,-40,-40,-50,-50,-40,-40,-30],
+    [-30,-40,-40,-50,-50,-40,-40,-30],
+    [-20,-30,-30,-40,-40,-30,-30,-20],
+    [-10,-20,-20,-20,-20,-20,-20,-10],
+    [20,20,0,0,0,0,20,20],
+    [20,30,10,0,0,10,30,20]
+  ]
+};
+
+// --- State ---
+let board, turn, mode, selected, legalMovesSelected, gameOver, aiThinking, lastMove, inCheck;
+
+function initBoard() {
+  const b = Array.from({length:8}, () => Array(8).fill(null));
+  const backRank = ['rook','knight','bishop','queen','king','bishop','knight','rook'];
+  for (let c = 0; c < 8; c++) {
+    b[0][c] = { type: backRank[c], color: 'white' };
+    b[1][c] = { type: 'pawn', color: 'white' };
+    b[6][c] = { type: 'pawn', color: 'black' };
+    b[7][c] = { type: backRank[c], color: 'black' };
+  }
+  return b;
+}
+
+function newGame() {
+  board = initBoard();
+  turn = 'white';
+  selected = null;
+  legalMovesSelected = [];
+  gameOver = false;
+  aiThinking = false;
+  lastMove = null;
+  inCheck = false;
+  render();
+  updateStatus();
+}
+
+function setMode(m) {
+  mode = m;
+  document.getElementById('btn-1p').className = m === '1p' ? 'active' : '';
+  document.getElementById('btn-2p').className = m === '2p' ? 'active' : '';
+  newGame();
+}
+
+// --- Move generation ---
+function cloneBoard(b) {
+  return b.map(row => row.map(p => p ? {...p} : null));
+}
+
+function inBounds(r, c) { return r >= 0 && r < 8 && c >= 0 && c < 8; }
+
+function pseudoMoves(r, c, b) {
+  const p = b[r][c];
+  if (!p) return [];
+  const moves = [];
+  const opp = p.color === 'white' ? 'black' : 'white';
+
+  const slide = (dr, dc) => {
+    let nr = r + dr, nc = c + dc;
+    while (inBounds(nr, nc)) {
+      if (!b[nr][nc]) { moves.push([nr, nc]); }
+      else { if (b[nr][nc].color === opp) moves.push([nr, nc]); break; }
+      nr += dr; nc += dc;
+    }
+  };
+
+  if (p.type === 'pawn') {
+    const dir = p.color === 'white' ? 1 : -1;
+    const startRow = p.color === 'white' ? 1 : 6;
+    const nr = r + dir;
+    if (inBounds(nr, c) && !b[nr][c]) {
+      moves.push([nr, c]);
+      if (r === startRow && !b[r + 2*dir][c]) moves.push([r + 2*dir, c]);
+    }
+    for (const dc of [-1, 1]) {
+      if (inBounds(nr, c + dc) && b[nr][c + dc] && b[nr][c + dc].color === opp)
+        moves.push([nr, c + dc]);
+    }
+  } else if (p.type === 'knight') {
+    for (const [dr, dc] of [[-2,-1],[-2,1],[-1,-2],[-1,2],[1,-2],[1,2],[2,-1],[2,1]]) {
+      const nr = r + dr, nc = c + dc;
+      if (inBounds(nr, nc) && (!b[nr][nc] || b[nr][nc].color === opp))
+        moves.push([nr, nc]);
+    }
+  } else if (p.type === 'bishop') {
+    for (const [dr, dc] of [[-1,-1],[-1,1],[1,-1],[1,1]]) slide(dr, dc);
+  } else if (p.type === 'rook') {
+    for (const [dr, dc] of [[-1,0],[1,0],[0,-1],[0,1]]) slide(dr, dc);
+  } else if (p.type === 'queen') {
+    for (const [dr, dc] of [[-1,-1],[-1,1],[1,-1],[1,1],[-1,0],[1,0],[0,-1],[0,1]]) slide(dr, dc);
+  } else if (p.type === 'king') {
+    for (const [dr, dc] of [[-1,-1],[-1,1],[1,-1],[1,1],[-1,0],[1,0],[0,-1],[0,1]]) {
+      const nr = r + dr, nc = c + dc;
+      if (inBounds(nr, nc) && (!b[nr][nc] || b[nr][nc].color === opp))
+        moves.push([nr, nc]);
+    }
+  }
+  return moves;
+}
+
+function isAttacked(r, c, byColor, b) {
+  for (let rr = 0; rr < 8; rr++)
+    for (let cc = 0; cc < 8; cc++)
+      if (b[rr][cc] && b[rr][cc].color === byColor)
+        for (const [mr, mc] of pseudoMoves(rr, cc, b))
+          if (mr === r && mc === c) return true;
+  return false;
+}
+
+function findKing(color, b) {
+  for (let r = 0; r < 8; r++)
+    for (let c = 0; c < 8; c++)
+      if (b[r][c] && b[r][c].type === 'king' && b[r][c].color === color)
+        return [r, c];
+  return null;
+}
+
+function applyMove(fr, fc, tr, tc, b) {
+  const nb = cloneBoard(b);
+  nb[tr][tc] = nb[fr][fc];
+  nb[fr][fc] = null;
+  return nb;
+}
+
+function legalMovesFor(r, c, b) {
+  const p = b[r][c];
+  if (!p) return [];
+  const opp = p.color === 'white' ? 'black' : 'white';
+  return pseudoMoves(r, c, b).filter(([tr, tc]) => {
+    const nb = applyMove(r, c, tr, tc, b);
+    const [kr, kc] = findKing(p.color, nb);
+    return !isAttacked(kr, kc, opp, nb);
+  });
+}
+
+function allMovesFor(color, b) {
+  const moves = [];
+  for (let r = 0; r < 8; r++)
+    for (let c = 0; c < 8; c++)
+      if (b[r][c] && b[r][c].color === color)
+        for (const [tr, tc] of legalMovesFor(r, c, b))
+          moves.push([r, c, tr, tc]);
+  return moves;
+}
+
+function isInCheck(color, b) {
+  const opp = color === 'white' ? 'black' : 'white';
+  const [kr, kc] = findKing(color, b);
+  return isAttacked(kr, kc, opp, b);
+}
+
+// --- AI (minimax + alpha-beta) ---
+function evaluate(b) {
+  let score = 0;
+  for (let r = 0; r < 8; r++) {
+    for (let c = 0; c < 8; c++) {
+      const p = b[r][c];
+      if (!p) continue;
+      const pstR = p.color === 'white' ? r : 7 - r;
+      const pst = PST[p.type] ? PST[p.type][pstR][c] : 0;
+      const v = VAL[p.type] + pst;
+      score += p.color === 'white' ? v : -v;
+    }
+  }
+  return score; // positive = white advantage
+}
+
+function minimax(b, depth, alpha, beta, maximizing) {
+  const color = maximizing ? 'white' : 'black';
+  const moves = allMovesFor(color, b);
+  if (depth === 0 || moves.length === 0) {
+    if (moves.length === 0) {
+      if (isInCheck(color, b)) return maximizing ? -99999 : 99999;
+      return 0; // stalemate
+    }
+    return evaluate(b);
+  }
+  if (maximizing) {
+    let best = -Infinity;
+    for (const [fr, fc, tr, tc] of moves) {
+      const nb = applyMove(fr, fc, tr, tc, b);
+      best = Math.max(best, minimax(nb, depth-1, alpha, beta, false));
+      alpha = Math.max(alpha, best);
+      if (beta <= alpha) break;
+    }
+    return best;
+  } else {
+    let best = Infinity;
+    for (const [fr, fc, tr, tc] of moves) {
+      const nb = applyMove(fr, fc, tr, tc, b);
+      best = Math.min(best, minimax(nb, depth-1, alpha, beta, true));
+      beta = Math.min(beta, best);
+      if (beta <= alpha) break;
+    }
+    return best;
+  }
+}
+
+function getBestMove(b) {
+  const moves = allMovesFor('black', b);
+  if (!moves.length) return null;
+  let best = Infinity, bestMove = null;
+  for (const [fr, fc, tr, tc] of moves) {
+    const nb = applyMove(fr, fc, tr, tc, b);
+    const score = minimax(nb, 2, -Infinity, Infinity, true);
+    if (score < best) { best = score; bestMove = [fr, fc, tr, tc]; }
+  }
+  return bestMove;
+}
+
+// --- Rendering ---
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+function sqToXY(r, c) { return [c * SQ, (7 - r) * SQ]; }
+
+function render() {
+  ctx.clearRect(0, 0, 560, 560);
+
+  // Draw squares
+  for (let r = 0; r < 8; r++) {
+    for (let c = 0; c < 8; c++) {
+      const [x, y] = sqToXY(r, c);
+      const isLight = (r + c) % 2 === 0;
+      ctx.fillStyle = isLight ? LIGHT : DARK;
+
+      // Last move highlight
+      if (lastMove && ((r===lastMove[0]&&c===lastMove[1])||(r===lastMove[2]&&c===lastMove[3])))
+        ctx.fillStyle = isLight ? '#a8c8f0' : '#5a88c0';
+
+      // Selected highlight
+      if (selected && selected[0]===r && selected[1]===c)
+        ctx.fillStyle = '#f0e040';
+
+      ctx.fillRect(x, y, SQ, SQ);
+
+      // Rank/file labels
+      ctx.fillStyle = isLight ? DARK : LIGHT;
+      ctx.font = '11px monospace';
+      if (c === 0) { ctx.fillText(r+1, x+3, y+SQ-4); }
+      if (r === 0) { ctx.fillText('abcdefgh'[c], x+SQ-10, y+SQ-4); }
+    }
+  }
+
+  // Legal move dots
+  for (const [mr, mc] of legalMovesSelected) {
+    const [x, y] = sqToXY(mr, mc);
+    ctx.fillStyle = board[mr][mc] ? 'rgba(80,200,80,0.6)' : 'rgba(80,200,80,0.45)';
+    if (board[mr][mc]) {
+      ctx.strokeStyle = 'rgba(80,200,80,0.8)';
+      ctx.lineWidth = 4;
+      ctx.strokeRect(x+2, y+2, SQ-4, SQ-4);
+    } else {
+      ctx.beginPath();
+      ctx.arc(x + SQ/2, y + SQ/2, 10, 0, Math.PI*2);
+      ctx.fill();
+    }
+  }
+
+  // Check highlight for king in check
+  if (inCheck) {
+    const [kr, kc] = findKing(turn, board);
+    const [x, y] = sqToXY(kr, kc);
+    ctx.fillStyle = 'rgba(255,60,60,0.45)';
+    ctx.fillRect(x, y, SQ, SQ);
+  }
+
+  // Draw pieces
+  ctx.font = '50px serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  for (let r = 0; r < 8; r++) {
+    for (let c = 0; c < 8; c++) {
+      const p = board[r][c];
+      if (!p) continue;
+      const [x, y] = sqToXY(r, c);
+      ctx.fillStyle = p.color === 'white' ? '#ffffff' : '#1a1a2e';
+      ctx.strokeStyle = p.color === 'white' ? '#555' : '#ccc';
+      ctx.lineWidth = 1.5;
+      ctx.strokeText(GLYPHS[p.color][p.type], x + SQ/2, y + SQ/2 + 2);
+      ctx.fillText(GLYPHS[p.color][p.type], x + SQ/2, y + SQ/2 + 2);
+    }
+  }
+}
+
+function updateStatus() {
+  const el = document.getElementById('status');
+  if (gameOver) return;
+  if (aiThinking) { el.textContent = 'Computer thinking…'; return; }
+  const moves = allMovesFor(turn, board);
+  inCheck = isInCheck(turn, board);
+  if (moves.length === 0) {
+    gameOver = true;
+    if (inCheck) {
+      el.textContent = (turn === 'white' ? 'Black' : 'White') + ' wins! Checkmate.';
+    } else {
+      el.textContent = 'Stalemate — draw!';
+    }
+    return;
+  }
+  if (inCheck) {
+    el.textContent = (turn === 'white' ? 'White' : 'Black') + ' is in check!';
+  } else if (mode === '1p') {
+    el.textContent = turn === 'white' ? 'Your turn (White)' : 'Computer thinking…';
+  } else {
+    el.textContent = (turn === 'white' ? 'White' : 'Black') + "'s turn";
+  }
+}
+
+function doMove(fr, fc, tr, tc) {
+  lastMove = [fr, fc, tr, tc];
+  board = applyMove(fr, fc, tr, tc, board);
+  turn = turn === 'white' ? 'black' : 'white';
+  selected = null;
+  legalMovesSelected = [];
+  inCheck = isInCheck(turn, board);
+  updateStatus();
+  render();
+}
+
+function triggerAI() {
+  if (gameOver) return;
+  aiThinking = true;
+  updateStatus();
+  render();
+  setTimeout(() => {
+    const mv = getBestMove(board);
+    aiThinking = false;
+    if (mv) doMove(...mv);
+    else { gameOver = true; document.getElementById('status').textContent = 'No moves — draw!'; render(); }
+  }, 300);
+}
+
+canvas.addEventListener('click', e => {
+  if (gameOver || aiThinking) return;
+  if (mode === '1p' && turn === 'black') return;
+
+  const rect = canvas.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+  const y = e.clientY - rect.top;
+  const c = Math.floor(x / SQ);
+  const r = 7 - Math.floor(y / SQ);
+  if (!inBounds(r, c)) return;
+
+  // If a move is selected and we click a legal destination
+  if (selected) {
+    const move = legalMovesSelected.find(([mr, mc]) => mr===r && mc===c);
+    if (move) {
+      doMove(selected[0], selected[1], r, c);
+      if (mode === '1p' && turn === 'black' && !gameOver) triggerAI();
+      return;
+    }
+  }
+
+  // Select a piece
+  if (board[r][c] && board[r][c].color === turn) {
+    selected = [r, c];
+    legalMovesSelected = legalMovesFor(r, c, board);
+  } else {
+    selected = null;
+    legalMovesSelected = [];
+  }
+  render();
+});
+
+// Start
+mode = '1p';
+newGame();
+</script>
+</body>
+</html>
