@@ -19,6 +19,7 @@ A collection of retro-style browser games. Each game is a **single self-containe
 |------|-----------|-------------|
 | `tictactoe.html` | DOM/CSS | Two-player Tic Tac Toe with score tracking |
 | `shooter.html` | HTML5 Canvas | Top-down wave shooter |
+| `chess.html` | HTML5 Canvas | Chess with 1-player AI (minimax depth-3) and 2-player modes |
 
 ## shooter.html Architecture
 
